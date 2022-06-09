@@ -34,17 +34,19 @@ export class AppService {
   constructor(private reviewService: ReviewService) {}
 
   async decisionEngine(decisionEngineDto: DecisionEngineDto) {
+    const notes = {};
     const creditHistory = await this.reviewService.getCreditHistory(
       decisionEngineDto.firstLastname,
       decisionEngineDto.identification,
     );
     const responses = [
       this.creditExperience(creditHistory),
-      this.aciertaPlus(creditHistory),
-      this.qualification(creditHistory),
-      this.creditDefault(creditHistory),
+      this.aciertaPlus(creditHistory, notes),
+      this.qualification(creditHistory, notes),
+      this.creditDefault(creditHistory, notes),
       this.indebtednessCapacity(
         creditHistory,
+        notes,
         decisionEngineDto.requestAmount,
         decisionEngineDto.interestRate,
         decisionEngineDto.term,
@@ -68,7 +70,11 @@ export class AppService {
     return {
       indent: policyResponse.ident,
       name: policyResponse.name,
-      responses,
+      responses: responses.reduce((pre, curr) => {
+        pre[curr.ident] = curr;
+        return pre;
+      }, {}),
+      notes,
       projections,
       score,
     };
@@ -126,14 +132,15 @@ export class AppService {
         break;
     }
     return {
-      type: 'Experiencia crediticia',
+      ident: creditExperience.ident,
+      label: 'Experiencia crediticia',
       response: characteristic,
       value: (characteristic.score * creditExperience.weight) / 100,
       origin: 'Datacredito',
     };
   }
 
-  private aciertaPlus(creditHistory) {
+  private aciertaPlus(creditHistory, notes) {
     let characteristic;
     let acierta = this.reviewService.getPersonalizedAnswer(
       creditHistory,
@@ -153,21 +160,20 @@ export class AppService {
     } else if (acierta < 500) {
       characteristic = less500;
     }
+    notes['score'] = {
+      label: 'Score',
+      value: acierta,
+    };
     return {
-      type: 'Acierta +',
+      ident: aciertaPlus.ident,
+      label: 'Acierta +',
       response: characteristic,
       value: (characteristic.score * aciertaPlus.weight) / 100,
-      notes: [
-        {
-          name: 'Score',
-          description: acierta,
-        },
-      ],
       origin: 'Datacredito',
     };
   }
 
-  private qualification(creditHistory) {
+  private qualification(creditHistory, notes) {
     let characteristic;
     let infoAgregada = creditHistory.Informes.Informe.InfoAgregada;
     let trimestres = infoAgregada
@@ -184,21 +190,20 @@ export class AppService {
     } else {
       characteristic = differentQualificationAB;
     }
+    notes['qualification'] = {
+      label: 'Calificación',
+      value: creditHistoryQualification,
+    };
     return {
-      type: 'Calificación',
+      ident: qualification.ident,
+      label: 'Calificación',
       response: characteristic,
       value: (characteristic.score * qualification.weight) / 100,
-      notes: [
-        {
-          name: 'Calificación',
-          description: creditHistoryQualification,
-        },
-      ],
       origin: 'Datacredito',
     };
   }
 
-  private creditDefault(creditHistory) {
+  private creditDefault(creditHistory, notes) {
     let characteristic;
     let creditDefaultToday = 0;
     let creditDefaultHistoric = 0;
@@ -217,23 +222,26 @@ export class AppService {
     } else {
       characteristic = noCreditDefaults;
     }
+    notes[withHistoricalCreditDefaults.ident] = {
+      label: 'Moras Historicas',
+      valie: creditDefaultHistoric,
+    };
+    notes[withCreditDefaults.ident] = {
+      label: 'Moras Actuales',
+      valie: creditDefaultToday,
+    };
     return {
-      type: 'Moras',
+      ident: creditDefaults.ident,
+      label: 'Moras',
       response: characteristic,
       origin: 'Datacredito',
       value: (characteristic.score * creditDefaults.weight) / 100,
-      notes: [
-        { name: 'Moras Historicas', description: creditDefaultHistoric },
-        {
-          name: 'Moras Actuales',
-          description: creditDefaultToday,
-        },
-      ],
     };
   }
 
   private indebtednessCapacity(
     creditHistory,
+    notes,
     requestAmount,
     interestRate,
     term,
@@ -246,18 +254,16 @@ export class AppService {
         'QUANTO3_MEDIO',
       )[0],
     );
+    notes['paymentFees'] = {
+      label: 'Cuotas financieras',
+      value: paymentFees,
+    };
+    notes['quanto'] = {
+      label: 'Quanto Medio',
+      value: incomeCreditHistory,
+    };
     const decisionEngineResponse: any = {
-      type: 'Capacidad',
-      notes: [
-        {
-          name: 'Cuotas financieras',
-          description: paymentFees,
-        },
-        {
-          name: 'Quanto Medio',
-          description: incomeCreditHistory,
-        },
-      ],
+      label: 'Capacidad',
     };
     const amountAvailable = this.getAmountAvalaible(
       income,
@@ -271,6 +277,7 @@ export class AppService {
     decisionEngineResponse.response = characteristic;
     decisionEngineResponse.value =
       (characteristic.score * borrowingCapacity.weight) / 100;
+    decisionEngineResponse.ident = borrowingCapacity.ident;
     return decisionEngineResponse;
   }
 
